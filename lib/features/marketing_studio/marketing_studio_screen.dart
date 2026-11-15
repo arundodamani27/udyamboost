@@ -3,6 +3,20 @@ import 'package:flutter/services.dart';
 
 import '../../core/services/ai_service.dart';
 
+/// The kinds of marketing text the studio can write.
+enum _ContentType {
+  description('Description', 'Your description', Icons.notes_rounded),
+  caption('Instagram Caption', 'Your caption', Icons.camera_alt_outlined),
+  hashtags('Hashtags', 'Your hashtags', Icons.tag_rounded),
+  whatsapp('WhatsApp Message', 'Your WhatsApp message', Icons.chat_outlined);
+
+  const _ContentType(this.label, this.resultTitle, this.icon);
+
+  final String label;
+  final String resultTitle;
+  final IconData icon;
+}
+
 class MarketingStudioScreen extends StatefulWidget {
   const MarketingStudioScreen({super.key});
 
@@ -32,6 +46,7 @@ class _MarketingStudioScreenState extends State<MarketingStudioScreen> {
   final _priceController = TextEditingController();
 
   String _category = _categories.first;
+  _ContentType _type = _ContentType.description;
   bool _isGenerating = false;
   String? _result;
 
@@ -48,12 +63,21 @@ class _MarketingStudioScreenState extends State<MarketingStudioScreen> {
 
     setState(() => _isGenerating = true);
 
+    final type = _type;
+    final name = _nameController.text.trim();
+    final category = _category;
+    final price = double.parse(_priceController.text.trim());
+
     try {
-      final text = await AiService.productDescription(
-        _nameController.text.trim(),
-        _category,
-        double.parse(_priceController.text.trim()),
-      );
+      final text = await switch (type) {
+        _ContentType.description =>
+          AiService.productDescription(name, category, price),
+        _ContentType.caption =>
+          AiService.instagramCaption(name, category, price),
+        _ContentType.hashtags => AiService.hashtags(name, category),
+        _ContentType.whatsapp =>
+          AiService.whatsappMessage(name, category, price),
+      };
       if (!mounted) return;
       setState(() => _result = text);
     } catch (error, stackTrace) {
@@ -122,6 +146,54 @@ class _MarketingStudioScreenState extends State<MarketingStudioScreen> {
           fontWeight: FontWeight.w600,
           color: dark,
         ),
+      ),
+    );
+  }
+
+  void _selectType(_ContentType type) {
+    if (type == _type) return;
+    setState(() {
+      _type = type;
+      _result = null;
+    });
+  }
+
+  Widget _buildTypeChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final type in _ContentType.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(type.label),
+                avatar: Icon(
+                  type.icon,
+                  size: 18,
+                  color: type == _type ? Colors.white : muted,
+                ),
+                showCheckmark: false,
+                selected: type == _type,
+                // Locked while generating, so a reply can't land under the
+                // wrong title.
+                onSelected: _isGenerating ? null : (_) => _selectType(type),
+                selectedColor: primary,
+                backgroundColor: Colors.white,
+                disabledColor: Colors.white,
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: type == _type ? Colors.white : dark,
+                ),
+                side: BorderSide(
+                  color: type == _type ? primary : const Color(0xFFDCE3ED),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -234,10 +306,10 @@ class _MarketingStudioScreenState extends State<MarketingStudioScreen> {
             children: [
               const Icon(Icons.auto_awesome_rounded, color: primary, size: 20),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Your description',
-                  style: TextStyle(
+                  _type.resultTitle,
+                  style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                     color: dark,
@@ -284,8 +356,10 @@ class _MarketingStudioScreenState extends State<MarketingStudioScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _buildTypeChips(),
+              const SizedBox(height: 16),
               const Text(
-                'Describe your product and let AI write the description for you.',
+                'Pick what you need, describe your product, and let AI write it for you.',
                 style: TextStyle(fontSize: 14, height: 1.4, color: muted),
               ),
               const SizedBox(height: 22),

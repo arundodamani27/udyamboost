@@ -75,6 +75,22 @@ class AiService {
     return text;
   }
 
+  /// Rules added to every prompt so the reply is plain text that can be
+  /// pasted straight into Instagram or WhatsApp.
+  static const String _styleRules =
+      'Use simple, friendly English. Do not use markdown. Do not use asterisks. '
+      'Reply with only the text itself, with no title and no extra explanation.';
+
+  static String _productDetails(String name, String category, [double? price]) {
+    final buffer = StringBuffer()
+      ..writeln('Product name: $name')
+      ..writeln('Category: $category');
+    if (price != null) {
+      buffer.writeln('Price: ₹${price.toStringAsFixed(2)}');
+    }
+    return buffer.toString();
+  }
+
   /// Writes a short, catchy product description for a small business.
   static Future<String> productDescription(
     String name,
@@ -84,12 +100,62 @@ class AiService {
     final prompt = '''
 You are a marketing assistant for small Indian businesses.
 Write a short, catchy product description (3-4 sentences) for this product.
-Use simple, friendly English. Do not use markdown or bullet points.
+Do not use bullet points.
+$_styleRules
 
-Product name: $name
-Category: $category
-Price: ₹${price.toStringAsFixed(2)}
-''';
+${_productDetails(name, category, price)}''';
+    return generate(prompt);
+  }
+
+  /// Writes an Instagram caption: 2-3 short lines, a few emojis,
+  /// ending with a call to action. No hashtags.
+  static Future<String> instagramCaption(
+    String name,
+    String category,
+    double price,
+  ) {
+    final prompt = '''
+You are a social media marketer for small Indian businesses.
+Write a catchy Instagram caption for this product.
+It must be 2-3 short lines and use a few emojis.
+End with a clear call to action, such as "DM us to order" or "Tap the link to shop".
+Do not include any hashtags.
+$_styleRules
+
+${_productDetails(name, category, price)}''';
+    return generate(prompt);
+  }
+
+  /// Writes 10-12 hashtags on one line, separated by spaces.
+  static Future<String> hashtags(String name, String category) {
+    final prompt = '''
+You are a social media marketer for small Indian businesses.
+Suggest 10 to 12 relevant Instagram hashtags for this product.
+Mix popular hashtags with niche ones that suit Indian small businesses and local shoppers.
+Put every hashtag on one single line, separated by single spaces.
+Each hashtag must start with # and contain no spaces.
+Do not number them and do not add any other text.
+$_styleRules
+
+${_productDetails(name, category)}''';
+    return generate(prompt);
+  }
+
+  /// Writes a friendly WhatsApp promo message under 60 words,
+  /// with 1-2 emojis and a "reply to order" call to action.
+  static Future<String> whatsappMessage(
+    String name,
+    String category,
+    double price,
+  ) {
+    final prompt = '''
+You are a marketing assistant for small Indian businesses.
+Write a friendly promotional WhatsApp message that a shop owner can send to their customers about this product.
+Keep it under 60 words and use only 1 or 2 emojis.
+End by asking the customer to reply to this message to place an order.
+$_styleRules
+
+${_productDetails(name, category, price)}''';
     return generate(prompt);
   }
 }
