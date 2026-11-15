@@ -1,6 +1,7 @@
 
 import 'package:flutter/material.dart';
 import '../products/products_screen.dart';
+import '../marketing_studio/marketing_studio_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String businessName;
@@ -559,6 +560,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   if (index == 0) {
     setState(() => _selectedIndex = 0);
+    return;
+  }
+
+  if (index == 2) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const MarketingStudioScreen(),
+      ),
+    );
     return;
   }
 
