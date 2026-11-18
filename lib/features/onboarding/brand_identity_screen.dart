@@ -1,10 +1,29 @@
-
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+// UdyamBoost brand palette (same values as app.dart).
+class _Brand {
+  static const Color cream = Color(0xFFFAF3E1);
+  static const Color beige = Color(0xFFF5E7C6);
+  static const Color tangerine = Color(0xFFFF6D1F);
+  static const Color charcoal = Color(0xFF222222);
+
+  static const Color muted = Color(0xB3222222);
+  static const Color subtle = Color(0x73222222);
+  static const Color line = Color(0x24222222);
+
+  static const Color creamMuted = Color(0xB8FAF3E1);
+  static const Color creamLine = Color(0x33FAF3E1);
+
+  static const Color error = Color(0xFFB83A0A);
+}
+
+/// Width at which the page switches to a split brand-panel + form layout.
+const double _splitBreakpoint = 960;
 
 class BrandIdentityScreen extends StatefulWidget {
   final String businessName;
@@ -30,10 +49,7 @@ class BrandIdentityScreen extends StatefulWidget {
 }
 
 class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
-  static const Color primary = Color(0xFF2457E6);
-  static const Color dark = Color(0xFF14213D);
-  static const Color muted = Color(0xFF64748B);
-  static const Color background = Color(0xFFF7F9FC);
+  static const double _formMaxWidth = 720;
 
   final ImagePicker _picker = ImagePicker();
   bool _isSaving = false;
@@ -84,27 +100,527 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
     super.dispose();
   }
 
-  Widget _sectionTitle(String title, String subtitle) {
+  Future<String?> _uploadLogo(String userId) async {
+    if (_logo == null) return null;
+
+    final supabase = Supabase.instance.client;
+
+    final extension = _logo!.path.split('.').last.toLowerCase();
+
+    final contentType = switch (extension) {
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => 'image/jpeg',
+    };
+
+    final filePath = '$userId/logo.$extension';
+
+    await supabase.storage
+        .from('business-assets')
+        .upload(
+          filePath,
+          _logo!,
+          fileOptions: FileOptions(
+            upsert: true,
+            contentType: contentType,
+          ),
+        );
+
+    return supabase.storage
+        .from('business-assets')
+        .getPublicUrl(filePath);
+  }
+
+  Future<void> _continue() async {
+    if (_isSaving) return;
+
+    final user = Supabase.instance.client.auth.currentUser;
+
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('Please log in before saving your business profile.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final supabase = Supabase.instance.client;
+      final logoUrl = await _uploadLogo(user.id);
+
+      await supabase.from('business_profiles').upsert(
+        {
+          'user_id': user.id,
+          'business_name': widget.businessName,
+          'owner_name': widget.ownerName,
+          'phone': widget.phone,
+          'category': widget.category,
+          'location': widget.location,
+          'description': widget.description,
+          'primary_color':
+              '#${_primaryColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
+          'secondary_color':
+              '#${_secondaryColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
+          'instagram_url': _instagramController.text.trim().isEmpty
+              ? null
+              : _instagramController.text.trim(),
+          'facebook_url': _facebookController.text.trim().isEmpty
+              ? null
+              : _facebookController.text.trim(),
+          'website_url': _websiteController.text.trim().isEmpty
+              ? null
+              : _websiteController.text.trim(),
+          'logo_url': ?logoUrl,
+        },
+        onConflict: 'user_id',
+      );
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DashboardScreen(
+            businessName: widget.businessName,
+            category: widget.category,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to save business profile: $error'),
+          backgroundColor: _Brand.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  // ── PAGE ───────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _Brand.cream,
+      appBar: AppBar(
+        backgroundColor: _Brand.cream,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: _Brand.charcoal,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: 'Back',
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          'Brand Identity',
+          style: TextStyle(
+            color: _Brand.charcoal,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: _Brand.line),
+        ),
+      ),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < _splitBreakpoint) {
+              // Phones and tablets: one scrolling column.
+              return _formPane(showIntro: true);
+            }
+
+            // Laptops and desktops: brand panel with live preview + form.
+            return Row(
+              children: [
+                Expanded(flex: 5, child: _sidePanel()),
+                Expanded(flex: 7, child: _formPane(showIntro: false)),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _sidePanel() {
+    return Container(
+      width: double.infinity,
+      color: _Brand.charcoal,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(56, 48, 56, 48),
+        child: Align(
+          alignment: Alignment.topRight,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _logoMark(),
+                const SizedBox(height: 56),
+                _intro(onDark: true, roomy: true),
+                const SizedBox(height: 40),
+                _previewSection(onDark: true),
+                const SizedBox(height: 20),
+                _laterNote(onDark: true),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _logoMark() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          height: 44,
+          width: 44,
+          decoration: BoxDecoration(
+            color: _Brand.tangerine,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(
+            Icons.storefront_rounded,
+            color: _Brand.charcoal,
+            size: 25,
+          ),
+        ),
+        const SizedBox(width: 10),
+        const Text(
+          'UdyamBoost',
+          style: TextStyle(
+            fontSize: 21,
+            fontWeight: FontWeight.w800,
+            color: _Brand.cream,
+            letterSpacing: -0.6,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _formPane({required bool showIntro}) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool roomy = constraints.maxWidth >= 680;
+        final double hPad = roomy ? 40 : 22;
+
+        return Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 32),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: _formMaxWidth),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (showIntro) ...[
+                          _intro(onDark: false, roomy: roomy),
+                          const SizedBox(height: 28),
+                        ],
+
+                        // LOGO
+                        _section(
+                          title: 'Business Logo',
+                          subtitle: 'Add your existing business logo.',
+                          showDivider: showIntro,
+                          child: _buildLogoPicker(),
+                        ),
+
+                        // COLOURS
+                        _section(
+                          title: 'Brand Colours',
+                          subtitle:
+                              'Choose colours that represent your brand.',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _colorPicker(
+                                title: 'Primary colour',
+                                selectedColor: _primaryColor,
+                                onSelected: (color) {
+                                  setState(() => _primaryColor = color);
+                                },
+                              ),
+                              const SizedBox(height: 24),
+                              _colorPicker(
+                                title: 'Secondary colour',
+                                selectedColor: _secondaryColor,
+                                onSelected: (color) {
+                                  setState(() => _secondaryColor = color);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // SOCIAL
+                        _section(
+                          title: 'Social Media & Website',
+                          subtitle:
+                              'Help customers discover your business online.',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _socialField(
+                                icon: Icons.camera_alt_outlined,
+                                label: 'Instagram',
+                                hint: 'https://instagram.com/yourbusiness',
+                                controller: _instagramController,
+                              ),
+                              const SizedBox(height: 18),
+                              _socialField(
+                                icon: Icons.facebook,
+                                label: 'Facebook',
+                                hint: 'https://facebook.com/yourbusiness',
+                                controller: _facebookController,
+                              ),
+                              const SizedBox(height: 18),
+                              _socialField(
+                                icon: Icons.language,
+                                label: 'Website',
+                                hint: 'https://yourbusiness.com',
+                                controller: _websiteController,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // PREVIEW + NOTE (shown here on narrow layouts only;
+                        // on desktop they live in the side panel)
+                        if (showIntro) ...[
+                          const Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: _Brand.line,
+                          ),
+                          const SizedBox(height: 24),
+                          _previewSection(onDark: false),
+                          const SizedBox(height: 20),
+                          _laterNote(onDark: false),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+            // BOTTOM CONTINUE BAR
+            Container(
+              padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 12),
+              decoration: const BoxDecoration(
+                color: _Brand.cream,
+                border: Border(top: BorderSide(color: _Brand.line)),
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: _formMaxWidth),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: ElevatedButton(
+                      onPressed: _isSaving ? null : _continue,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _Brand.tangerine,
+                        foregroundColor: _Brand.charcoal,
+                        disabledBackgroundColor:
+                            _Brand.tangerine.withValues(alpha: 0.6),
+                        disabledForegroundColor: _Brand.charcoal,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: _isSaving
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(
+                                color: _Brand.charcoal,
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Continue',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                SizedBox(width: 10),
+                                Icon(Icons.arrow_forward_rounded, size: 20),
+                              ],
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Progress indicator, heading and description.
+  Widget _intro({required bool onDark, required bool roomy}) {
+    final Color main = onDark ? _Brand.cream : _Brand.charcoal;
+    final Color soft = onDark ? _Brand.creamMuted : _Brand.muted;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'STEP 02 OF 03',
+              style: TextStyle(
+                color: main,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
+            ),
+            Text(
+              '66% completed',
+              style: TextStyle(color: soft, fontSize: 12),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: LinearProgressIndicator(
+            value: 0.66,
+            minHeight: 6,
+            backgroundColor: onDark ? _Brand.creamLine : _Brand.beige,
+            valueColor: const AlwaysStoppedAnimation(_Brand.tangerine),
+          ),
+        ),
+        SizedBox(height: onDark ? 36 : 30),
+        Text(
+          'Make your brand\nrecognisable.',
+          style: TextStyle(
+            fontSize: onDark ? 40 : (roomy ? 34 : 29),
+            height: 1.15,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.9,
+            color: main,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          'Create a visual identity that represents your business.',
+          style: TextStyle(
+            fontSize: onDark ? 16 : 14.5,
+            height: 1.6,
+            color: soft,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── SECTIONS & SMALL WIDGETS ───────────────────────────────────────────────
+  Widget _section({
+    required String title,
+    required String subtitle,
+    required Widget child,
+    bool showDivider = true,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (showDivider) ...[
+          const Divider(height: 1, thickness: 1, color: _Brand.line),
+          const SizedBox(height: 24),
+        ],
+        _sectionTitle(title, subtitle),
+        const SizedBox(height: 18),
+        child,
+        const SizedBox(height: 28),
+      ],
+    );
+  }
+
+  Widget _sectionTitle(String title, String subtitle, {bool onDark = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 17,
-            fontWeight: FontWeight.w700,
-            color: dark,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.2,
+            color: onDark ? _Brand.cream : _Brand.charcoal,
           ),
         ),
-        const SizedBox(height: 5),
+        const SizedBox(height: 3),
         Text(
           subtitle,
-          style: const TextStyle(
-            fontSize: 13,
-            color: muted,
+          style: TextStyle(
+            fontSize: 12.5,
+            color: onDark ? _Brand.creamMuted : _Brand.muted,
           ),
         ),
       ],
+    );
+  }
+
+  Widget _optionalLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text.rich(
+        TextSpan(
+          text: text,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: _Brand.charcoal,
+          ),
+          children: const [
+            TextSpan(
+              text: '   Optional',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: _Brand.subtle,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -114,30 +630,37 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
     required String hint,
     required TextEditingController controller,
   }) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 13),
-      child: TextField(
-        controller: controller,
-        decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: muted, size: 20),
-          labelText: label,
-          hintText: hint,
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(13),
-            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(13),
-            borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(13),
-            borderSide: const BorderSide(color: primary, width: 1.5),
+    OutlineInputBorder border(Color color, [double width = 1]) {
+      return OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: color, width: width),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _optionalLabel(label),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.url,
+          style: const TextStyle(fontSize: 14.5, color: _Brand.charcoal),
+          decoration: InputDecoration(
+            prefixIcon: Icon(icon, color: _Brand.subtle, size: 20),
+            hintText: hint,
+            hintStyle: const TextStyle(fontSize: 13.5, color: _Brand.subtle),
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.65),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 17,
+            ),
+            border: border(_Brand.line),
+            enabledBorder: border(const Color(0x40222222)),
+            focusedBorder: border(_Brand.tangerine, 2),
           ),
         ),
-      ),
+      ],
     );
   }
 
@@ -152,37 +675,44 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
         Text(
           title,
           style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: dark,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: _Brand.charcoal,
           ),
         ),
         const SizedBox(height: 12),
         Wrap(
-          spacing: 13,
-          runSpacing: 12,
+          spacing: 10,
+          runSpacing: 10,
           children: _brandColors.map((color) {
             final isSelected = color == selectedColor;
 
             return GestureDetector(
               onTap: () => onSelected(color),
               child: Container(
-                width: 35,
-                height: 35,
+                width: 44,
+                height: 44,
+                padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: color,
                   shape: BoxShape.circle,
-                  border: isSelected
-                      ? Border.all(color: dark, width: 2.5)
+                  border: Border.all(
+                    color: isSelected ? _Brand.charcoal : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                  child: isSelected
+                      ? const Icon(
+                          Icons.check,
+                          color: Colors.white,
+                          size: 18,
+                        )
                       : null,
                 ),
-                child: isSelected
-                    ? const Icon(
-                        Icons.check,
-                        color: Colors.white,
-                        size: 19,
-                      )
-                    : null,
               ),
             );
           }).toList(),
@@ -192,73 +722,105 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
   }
 
   Widget _buildLogoPicker() {
-    return Center(
-      child: Column(
-        children: [
-          GestureDetector(
-            onTap: _pickLogo,
-            child: Container(
-              width: 112,
-              height: 112,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFF4FF),
-                borderRadius: BorderRadius.circular(25),
-                border: Border.all(
-                  color: const Color(0xFFD5E2FF),
-                  width: 1.5,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        GestureDetector(
+          onTap: _pickLogo,
+          child: Container(
+            width: 112,
+            height: 112,
+            decoration: BoxDecoration(
+              color: _Brand.beige,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _Brand.line, width: 1.5),
+            ),
+            child: _logo != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(14.5),
+                    child: Image.file(
+                      _logo!,
+                      fit: BoxFit.cover,
+                    ),
+                  )
+                : const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.add_photo_alternate_outlined,
+                        color: _Brand.charcoal,
+                        size: 32,
+                      ),
+                      SizedBox(height: 7),
+                      Text(
+                        'Add Logo',
+                        style: TextStyle(
+                          color: _Brand.charcoal,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+        const SizedBox(width: 20),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _pickLogo,
+                icon: const Icon(Icons.upload_outlined, size: 18),
+                label: Text(_logo == null ? 'Upload logo' : 'Change logo'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _Brand.charcoal,
+                  minimumSize: const Size(0, 44),
+                  side: const BorderSide(color: _Brand.charcoal),
+                  textStyle: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
-              child: _logo != null
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(23),
-                      child: Image.file(
-                        _logo!,
-                        fit: BoxFit.cover,
-                      ),
-                    )
-                  : const Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.add_photo_alternate_outlined,
-                          color: primary,
-                          size: 35,
-                        ),
-                        SizedBox(height: 7),
-                        Text(
-                          'Add Logo',
-                          style: TextStyle(
-                            color: primary,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-            ),
+              const SizedBox(height: 8),
+              const Text(
+                'PNG or JPG recommended',
+                style: TextStyle(color: _Brand.muted, fontSize: 12),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          TextButton.icon(
-            onPressed: _pickLogo,
-            icon: const Icon(Icons.upload_outlined, size: 18),
-            label: Text(_logo == null ? 'Upload logo' : 'Change logo'),
-          ),
-          const Text(
-            'PNG or JPG recommended',
-            style: TextStyle(color: muted, fontSize: 11),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _buildBrandPreview() {
+  Widget _previewSection({required bool onDark}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle(
+          'Brand Preview',
+          'See how your business identity looks.',
+          onDark: onDark,
+        ),
+        const SizedBox(height: 16),
+        _buildBrandPreview(onDark: onDark),
+      ],
+    );
+  }
+
+  Widget _buildBrandPreview({required bool onDark}) {
     return Container(
-      padding: const EdgeInsets.all(17),
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        color: onDark ? _Brand.cream : Colors.white.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(14),
+        border: onDark ? null : Border.all(color: _Brand.line),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -267,12 +829,12 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
             'YOUR BRAND PREVIEW',
             style: TextStyle(
               fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.1,
-              color: muted,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+              color: _Brand.muted,
             ),
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 16),
           Row(
             children: [
               Container(
@@ -280,11 +842,11 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
                 height: 53,
                 decoration: BoxDecoration(
                   color: _primaryColor.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: _logo != null
                     ? ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(12),
                         child: Image.file(_logo!, fit: BoxFit.cover),
                       )
                     : Icon(
@@ -293,7 +855,7 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
                         size: 29,
                       ),
               ),
-              const SizedBox(width: 13),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -304,16 +866,18 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: dark,
+                        fontWeight: FontWeight.w800,
+                        color: _Brand.charcoal,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       widget.category,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: muted,
-                        fontSize: 12,
+                        color: _Brand.muted,
+                        fontSize: 12.5,
                       ),
                     ),
                   ],
@@ -321,7 +885,7 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 17),
+          const SizedBox(height: 18),
           Container(
             height: 8,
             decoration: BoxDecoration(
@@ -334,345 +898,27 @@ class _BrandIdentityScreenState extends State<BrandIdentityScreen> {
           const SizedBox(height: 12),
           const Text(
             'Your business. Your identity. Your growth.',
-            style: TextStyle(
-              fontSize: 12,
-              color: muted,
-            ),
+            style: TextStyle(fontSize: 12, color: _Brand.muted),
           ),
         ],
       ),
     );
   }
 
-  Future<String?> _uploadLogo(String userId) async {
-  if (_logo == null) return null;
+  Widget _laterNote({required bool onDark}) {
+    final Color color = onDark ? _Brand.creamMuted : _Brand.muted;
 
-  final supabase = Supabase.instance.client;
-
-  final extension = _logo!.path.split('.').last.toLowerCase();
-
-  final contentType = switch (extension) {
-    'png' => 'image/png',
-    'webp' => 'image/webp',
-    _ => 'image/jpeg',
-  };
-
-  final filePath = '$userId/logo.$extension';
-
-  await supabase.storage
-      .from('business-assets')
-      .upload(
-        filePath,
-        _logo!,
-        fileOptions: FileOptions(
-          upsert: true,
-          contentType: contentType,
-        ),
-      );
-
-  return supabase.storage
-      .from('business-assets')
-      .getPublicUrl(filePath);
-}
-
-  Future<void> _continue() async {
-  if (_isSaving) return;
-
-  final user = Supabase.instance.client.auth.currentUser;
-
-  if (user == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Please log in before saving your business profile.'),
-      ),
-    );
-    return;
-  }
-
-  setState(() {
-    _isSaving = true;
-  });
-
-  try {
-    final supabase = Supabase.instance.client;
-    final logoUrl = await _uploadLogo(user.id);
-
-    await supabase.from('business_profiles').upsert(
-      {
-        'user_id': user.id,
-        'business_name': widget.businessName,
-        'owner_name': widget.ownerName,
-        'phone': widget.phone,
-        'category': widget.category,
-        'location': widget.location,
-        'description': widget.description,
-        'primary_color':
-            '#${_primaryColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
-        'secondary_color':
-            '#${_secondaryColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
-        'instagram_url': _instagramController.text.trim().isEmpty
-            ? null
-            : _instagramController.text.trim(),
-        'facebook_url': _facebookController.text.trim().isEmpty
-            ? null
-            : _facebookController.text.trim(),
-        'website_url': _websiteController.text.trim().isEmpty
-            ? null
-            : _websiteController.text.trim(),
-        'logo_url': ?logoUrl,
-      },
-      onConflict: 'user_id',
-    );
-
-    if (!mounted) return;
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => DashboardScreen(
-          businessName: widget.businessName,
-          category: widget.category,
-        ),
-      ),
-    );
-  } catch (error) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Unable to save business profile: $error'),
-        backgroundColor: Colors.red,
-      ),
-    );
-  } finally {
-    if (mounted) {
-      setState(() {
-        _isSaving = false;
-      });
-    }
-  }
-}
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: background,
-      appBar: AppBar(
-        backgroundColor: background,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: dark),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Brand Identity',
-          style: TextStyle(
-            color: dark,
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
+    return Row(
+      children: [
+        Icon(Icons.info_outline, color: color, size: 17),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'You can update your brand details later.',
+            style: TextStyle(color: color, fontSize: 12),
           ),
         ),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(22, 4, 22, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: const [
-                    Text(
-                      'STEP 02 OF 03',
-                      style: TextStyle(
-                        color: primary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                    Text(
-                      '66% completed',
-                      style: TextStyle(color: muted, fontSize: 11),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: const LinearProgressIndicator(
-                    value: 0.66,
-                    minHeight: 6,
-                    backgroundColor: Color(0xFFE2E8F0),
-                    valueColor: AlwaysStoppedAnimation(primary),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(22, 0, 22, 25),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Make your brand\nrecognisable.',
-                    style: TextStyle(
-                      color: dark,
-                      fontSize: 27,
-                      fontWeight: FontWeight.w800,
-                      height: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Create a visual identity that represents your business.',
-                    style: TextStyle(
-                      color: muted,
-                      fontSize: 13,
-                      height: 1.5,
-                    ),
-                  ),
-                  const SizedBox(height: 25),
-
-                  _sectionTitle(
-                    'Business Logo',
-                    'Add your existing business logo.',
-                  ),
-                  const SizedBox(height: 17),
-                  _buildLogoPicker(),
-
-                  const SizedBox(height: 28),
-                  _sectionTitle(
-                    'Brand Colours',
-                    'Choose colours that represent your brand.',
-                  ),
-                  const SizedBox(height: 17),
-                  _colorPicker(
-                    title: 'Primary colour',
-                    selectedColor: _primaryColor,
-                    onSelected: (color) {
-                      setState(() => _primaryColor = color);
-                    },
-                  ),
-                  const SizedBox(height: 22),
-                  _colorPicker(
-                    title: 'Secondary colour',
-                    selectedColor: _secondaryColor,
-                    onSelected: (color) {
-                      setState(() => _secondaryColor = color);
-                    },
-                  ),
-
-                  const SizedBox(height: 28),
-                  _sectionTitle(
-                    'Social Media & Website',
-                    'Help customers discover your business online.',
-                  ),
-                  _socialField(
-                    icon: Icons.camera_alt_outlined,
-                    label: 'Instagram',
-                    hint: 'https://instagram.com/yourbusiness',
-                    controller: _instagramController,
-                  ),
-                  _socialField(
-                    icon: Icons.facebook,
-                    label: 'Facebook',
-                    hint: 'https://facebook.com/yourbusiness',
-                    controller: _facebookController,
-                  ),
-                  _socialField(
-                    icon: Icons.language,
-                    label: 'Website',
-                    hint: 'https://yourbusiness.com',
-                    controller: _websiteController,
-                  ),
-
-                  const SizedBox(height: 28),
-                  _sectionTitle(
-                    'Brand Preview',
-                    'See how your business identity looks.',
-                  ),
-                  const SizedBox(height: 14),
-                  _buildBrandPreview(),
-
-                  const SizedBox(height: 20),
-                  const Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        color: muted,
-                        size: 17,
-                      ),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'You can update your brand details later.',
-                          style: TextStyle(
-                            color: muted,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.fromLTRB(22, 13, 22, 20),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(
-            top: BorderSide(color: Color(0xFFE2E8F0)),
-          ),
-        ),
-        child: SafeArea(
-          top: false,
-          child: SizedBox(
-            height: 52,
-            child: ElevatedButton(
-              onPressed: _isSaving ? null : _continue,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primary,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              child: _isSaving
-    ? const SizedBox(
-        height: 22,
-        width: 22,
-        child: CircularProgressIndicator(
-          color: Colors.white,
-          strokeWidth: 2,
-        ),
-      )
-    : const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'Continue',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-            ),
-          ),
-          SizedBox(width: 9),
-          Icon(Icons.arrow_forward_rounded, size: 19),
-        ],
-      ),
-            ),
-          ),
-        ),
-      ),
+      ],
     );
   }
 }
