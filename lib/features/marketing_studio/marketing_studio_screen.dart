@@ -266,7 +266,7 @@ class _MarketingStudioScreenState extends State<MarketingStudioScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'Your ideas.\\nOur AI. Your growth.',
+                      'Your ideas.Our AI. Your growth.',
                       style: TextStyle(
                         fontSize: 23,
                         height: 1.3,

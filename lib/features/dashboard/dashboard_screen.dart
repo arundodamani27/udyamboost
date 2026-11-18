@@ -1,7 +1,10 @@
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../products/products_screen.dart';
 import '../marketing_studio/marketing_studio_screen.dart';
+import '../profile/profile_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String businessName;
@@ -25,7 +28,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   static const Color surface = Color(0xFFF5E7C6);
 
   static const List<BoxShadow> _softShadow = [
-    BoxShadow(color: Color(0x14222222), blurRadius: 16, offset: Offset(0, 6)),
+    BoxShadow(
+      color: Color(0x14222222),
+      blurRadius: 16,
+      offset: Offset(0, 6),
+    ),
   ];
 
   int _selectedIndex = 0;
@@ -40,17 +47,119 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _openProducts() {
+    setState(() => _selectedIndex = 1);
+
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const ProductsScreen()),
-    );
+    ).then((_) {
+      if (mounted) {
+        setState(() => _selectedIndex = 0);
+      }
+    });
   }
 
   void _openMarketing() {
+    setState(() => _selectedIndex = 2);
+
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const MarketingStudioScreen()),
+    ).then((_) {
+      if (mounted) {
+        setState(() => _selectedIndex = 0);
+      }
+    });
+  }
+
+  // Opens the actual Profile screen.
+  void _openProfile() {
+    setState(() => _selectedIndex = 3);
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfileScreen()),
+    ).then((_) {
+      if (mounted) {
+        setState(() => _selectedIndex = 0);
+      }
+    });
+  }
+
+  // Confirms logout before signing out from Supabase.
+  Future<void> _confirmLogout() async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: background,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: const Text(
+            'Log out?',
+            style: TextStyle(
+              color: dark,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          content: const Text(
+            'Are you sure you want to log out of your account?',
+            style: TextStyle(
+              color: muted,
+              height: 1.5,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(
+                  color: dark,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primary,
+                foregroundColor: dark,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Log out',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        );
+      },
     );
+
+    if (shouldLogout != true || !mounted) return;
+
+    try {
+      await Supabase.instance.client.auth.signOut();
+
+      if (!mounted) return;
+
+      // Return to the first screen after signing out.
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unable to log out: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   void _onNavigationTap(int index) {
@@ -60,8 +169,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _openProducts();
     } else if (index == 2) {
       _openMarketing();
-    } else {
-      _showComingSoon('Profile');
+    } else if (index == 3) {
+      _openProfile();
     }
   }
 
@@ -88,7 +197,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: InkWell(
           onTap: onTap,
           borderRadius: borderRadius,
-          child: Padding(padding: padding, child: child),
+          child: Padding(
+            padding: padding,
+            child: child,
+          ),
         ),
       ),
     );
@@ -133,7 +245,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 decoration: BoxDecoration(
                   color: surface,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: primary.withValues(alpha: 0.55)),
+                  border: Border.all(
+                    color: primary.withValues(alpha: 0.55),
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -166,31 +280,74 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
         const SizedBox(width: 14),
-        Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: primary,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: primary.withValues(alpha: 0.35),
-                blurRadius: 14,
-                offset: const Offset(0, 6),
-              ),
-            ],
+
+        // Account menu: Profile and Logout.
+        PopupMenuButton<String>(
+          tooltip: 'Account options',
+          onSelected: (value) {
+            if (value == 'profile') {
+              _openProfile();
+            } else if (value == 'logout') {
+              _confirmLogout();
+            }
+          },
+          color: background,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          child: Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(18),
-              onTap: () => _showComingSoon('Business profile'),
-              child: const Icon(
-                Icons.storefront_rounded,
-                color: dark,
-                size: 26,
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'profile',
+              child: Row(
+                children: [
+                  Icon(Icons.person_outline_rounded, color: dark),
+                  SizedBox(width: 12),
+                  Text(
+                    'My Profile',
+                    style: TextStyle(
+                      color: dark,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'logout',
+              child: Row(
+                children: [
+                  Icon(Icons.logout_rounded, color: primary),
+                  SizedBox(width: 12),
+                  Text(
+                    'Log out',
+                    style: TextStyle(
+                      color: dark,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          child: Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: primary,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: primary.withValues(alpha: 0.35),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.storefront_rounded,
+              color: dark,
+              size: 26,
             ),
           ),
         ),
@@ -242,7 +399,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const Positioned(
             right: 14,
             top: 14,
-            child: Icon(Icons.rocket_launch_rounded, size: 36, color: dark),
+            child: Icon(
+              Icons.rocket_launch_rounded,
+              size: 36,
+              color: dark,
+            ),
           ),
           Padding(
             padding: EdgeInsets.all(desktop ? 30 : 20),
@@ -357,7 +518,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           TextButton(
-            onPressed: () => _showComingSoon(action),
+            onPressed: () {
+              if (title == 'Business overview') {
+                _showComingSoon('Analytics');
+              } else if (title == 'Quick actions') {
+                _showComingSoon('More features');
+              } else if (title == 'Grow your business') {
+                _showComingSoon('Growth tips');
+              } else {
+                _showComingSoon(action);
+              }
+            },
             style: TextButton.styleFrom(
               foregroundColor: dark,
               minimumSize: const Size(48, 44),
@@ -375,7 +546,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
                 SizedBox(width: 4),
-                Icon(Icons.arrow_forward_rounded, color: primary, size: 15),
+                Icon(
+                  Icons.arrow_forward_rounded,
+                  color: primary,
+                  size: 15,
+                ),
               ],
             ),
           ),
@@ -436,7 +611,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             subtitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: muted, fontSize: 10),
+            style: const TextStyle(
+              color: muted,
+              fontSize: 10,
+            ),
           ),
         ],
       ),
@@ -518,7 +696,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildTipCard() {
     return _surfaceCard(
       padding: const EdgeInsets.all(16),
-      border: Border.all(color: primary.withValues(alpha: 0.4), width: 1.2),
+      border: Border.all(
+        color: primary.withValues(alpha: 0.4),
+        width: 1.2,
+      ),
       child: const Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -539,7 +720,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 SizedBox(height: 6),
                 Text(
                   'Add clear product photos and detailed descriptions to help customers understand what you offer.',
-                  style: TextStyle(color: muted, fontSize: 12, height: 1.5),
+                  style: TextStyle(
+                    color: muted,
+                    fontSize: 12,
+                    height: 1.5,
+                  ),
                 ),
               ],
             ),
@@ -561,7 +746,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               color: primary.withValues(alpha: 0.25),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: const Icon(Icons.storefront_outlined, color: dark, size: 21),
+            child: const Icon(
+              Icons.storefront_outlined,
+              color: dark,
+              size: 21,
+            ),
           ),
           const SizedBox(width: 12),
           const Expanded(
@@ -583,13 +772,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   'Your business journey starts here.',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: muted, fontSize: 11),
+                  style: TextStyle(
+                    color: muted,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
           ),
           const SizedBox(width: 8),
-          const Icon(Icons.check_circle, color: primary, size: 22),
+          const Icon(
+            Icons.check_circle,
+            color: primary,
+            size: 22,
+          ),
         ],
       ),
     );
@@ -626,7 +822,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children: [
         for (int i = 0; i < cards.length; i++) ...[
           Expanded(child: cards[i]),
-          if (i != cards.length - 1) SizedBox(width: width < 500 ? 8 : 14),
+          if (i != cards.length - 1)
+            SizedBox(width: width < 500 ? 8 : 14),
         ],
       ],
     );
@@ -636,8 +833,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final columns = width >= 1100
         ? 3
         : width >= 650
-        ? 2
-        : 1;
+            ? 2
+            : 1;
+
     const spacing = 14.0;
     final itemWidth = (width - spacing * (columns - 1)) / columns;
 
@@ -647,7 +845,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         description: 'Build your digital product catalogue',
         icon: Icons.add_box_outlined,
         color: primary,
-        onTap: () => _showComingSoon('Product catalogue'),
+        onTap: _openProducts,
       ),
       _buildQuickAction(
         title: 'AI Marketing Assistant',
@@ -671,7 +869,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       spacing: spacing,
       runSpacing: spacing,
       children: actions.map((action) {
-        return SizedBox(width: itemWidth, child: action);
+        return SizedBox(
+          width: itemWidth,
+          child: action,
+        );
       }).toList(),
     );
   }
@@ -681,11 +882,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       builder: (context, constraints) {
         final availableWidth = constraints.maxWidth;
         final desktop = availableWidth >= 1000;
+
         final horizontalPadding = availableWidth >= 1200
             ? 36.0
             : availableWidth >= 700
-            ? 28.0
-            : 20.0;
+                ? 28.0
+                : 20.0;
 
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
@@ -737,7 +939,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final selected = _selectedIndex == index;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: 5,
+      ),
       child: Material(
         color: selected ? primary : Colors.transparent,
         borderRadius: BorderRadius.circular(14),
@@ -745,16 +950,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
           borderRadius: BorderRadius.circular(14),
           onTap: () => _onNavigationTap(index),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 14,
+            ),
             child: Row(
               children: [
-                Icon(icon, color: selected ? dark : muted, size: 21),
+                Icon(
+                  icon,
+                  color: selected ? dark : muted,
+                  size: 21,
+                ),
                 const SizedBox(width: 14),
                 Text(
                   label,
                   style: TextStyle(
                     color: selected ? dark : muted,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    fontWeight: selected
+                        ? FontWeight.w800
+                        : FontWeight.w600,
                     fontSize: 14,
                   ),
                 ),
@@ -771,7 +985,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       width: 240,
       decoration: const BoxDecoration(
         color: surface,
-        border: Border(right: BorderSide(color: Color(0x1A222222), width: 1)),
+        border: Border(
+          right: BorderSide(
+            color: Color(0x1A222222),
+            width: 1,
+          ),
+        ),
       ),
       child: SafeArea(
         child: Column(
@@ -822,7 +1041,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
             ),
-            _buildNavItem(icon: Icons.home_rounded, label: 'Home', index: 0),
+            _buildNavItem(
+              icon: Icons.home_rounded,
+              label: 'Home',
+              index: 0,
+            ),
             _buildNavItem(
               icon: Icons.inventory_2_outlined,
               label: 'Products',
@@ -840,7 +1063,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const Spacer(),
             Padding(
-              padding: const EdgeInsets.all(18),
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
@@ -851,7 +1074,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.lightbulb_outline_rounded, color: primary),
+                    Icon(
+                      Icons.lightbulb_outline_rounded,
+                      color: primary,
+                    ),
                     SizedBox(height: 8),
                     Text(
                       'Grow your business',
@@ -864,9 +1090,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     SizedBox(height: 4),
                     Text(
                       'Create content and reach more customers.',
-                      style: TextStyle(color: muted, fontSize: 11, height: 1.4),
+                      style: TextStyle(
+                        color: muted,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
                     ),
                   ],
+                ),
+              ),
+            ),
+
+            // Desktop logout button.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _confirmLogout,
+                  icon: const Icon(
+                    Icons.logout_rounded,
+                    size: 19,
+                  ),
+                  label: const Text('Log out'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: dark,
+                    side: BorderSide(
+                      color: primary.withValues(alpha: 0.7),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -878,12 +1138,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildNavPill(IconData icon) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 18,
+        vertical: 4,
+      ),
       decoration: BoxDecoration(
         color: primary,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Icon(icon, color: dark, size: 22),
+      child: Icon(
+        icon,
+        color: dark,
+        size: 22,
+      ),
     );
   }
 
@@ -891,7 +1158,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Container(
       decoration: const BoxDecoration(
         color: surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(24),
+        ),
         boxShadow: [
           BoxShadow(
             color: Color(0x1F222222),
@@ -901,7 +1170,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: const BorderRadius.vertical(
+          top: Radius.circular(24),
+        ),
         child: SafeArea(
           top: false,
           child: BottomNavigationBar(
@@ -913,8 +1184,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
             unselectedItemColor: muted,
             selectedFontSize: 11,
             unselectedFontSize: 11,
-            selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w800),
-            unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
+            selectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w800,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+            ),
             elevation: 0,
             items: [
               BottomNavigationBarItem(
@@ -957,12 +1232,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ? Row(
                     children: [
                       _buildDesktopSidebar(),
-                      Expanded(child: _buildHomeContent()),
+                      Expanded(
+                        child: _buildHomeContent(),
+                      ),
                     ],
                   )
                 : _buildHomeContent(),
           ),
-          bottomNavigationBar: desktop ? null : _buildBottomNavigation(),
+          bottomNavigationBar:
+              desktop ? null : _buildBottomNavigation(),
         );
       },
     );
